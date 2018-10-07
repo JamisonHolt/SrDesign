@@ -62,10 +62,32 @@ def get_pixels_hu(scans):
 
 
 def pre_process(data_path, output_path):
-    id = 0
     patient = load_scan(data_path)
     imgs = get_pixels_hu(patient)
     np.save(output_path + "fullimages.npy", imgs)
+
+
+def show_houndsfield_hist(imgs_to_process):
+    """
+    Graphs a histogram of the different houndsfield units contained in our images
+
+    :param imgs_to_process:
+    :return:
+    """
+    plt.hist(imgs_to_process.flatten(), bins=50, color='c')
+    plt.xlabel("Hounsfield Units (HU)")
+    plt.ylabel("Frequency")
+    plt.show()
+
+
+def sample_stack(stack, rows=8, cols=8, start_with=0, show_every=1):
+    fig,ax = plt.subplots(rows,cols,figsize=[12,12])
+    for i in range(rows*cols):
+        ind = start_with + i*show_every
+        ax[int(i/rows),int(i % rows)].set_title('slice %d' % ind)
+        ax[int(i/rows),int(i % rows)].imshow(stack[ind],cmap='gray')
+        ax[int(i/rows),int(i % rows)].axis('off')
+    plt.show()
 
 
 def main():
@@ -75,11 +97,9 @@ def main():
 
     file_used = output_path + "fullimages.npy"
     imgs_to_process = np.load(file_used).astype(np.float64)
+    sample_stack(imgs_to_process)
 
-    plt.hist(imgs_to_process.flatten(), bins=50, color='c')
-    plt.xlabel("Hounsfield Units (HU)")
-    plt.ylabel("Frequency")
-    plt.show()
+
 
 if __name__ == '__main__':
     main()
