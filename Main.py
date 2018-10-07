@@ -30,6 +30,9 @@ def load_scan(path):
         slice_thickness = np.abs(slices[0].SliceLocation - slices[1].SliceLocation)
     for s in slices:
         s.SliceThickness = slice_thickness
+
+    print("Slice Thickness: %f" % slices[0].SliceThickness)
+    print("Pixel Spacing (row, col): (%f, %f) " % (slices[0].PixelSpacing[0], slices[0].PixelSpacing[1]))
     return slices
 
 def get_pixels_hu(scans):
@@ -95,11 +98,12 @@ def main():
     output_path = "./Outputs/full/"
     g = glob(data_path + '/*.dcm')
 
+    slices = load_scan(data_path)
+    print(slices[0].SliceThickness)
     file_used = output_path + "fullimages.npy"
     imgs_to_process = np.load(file_used).astype(np.float64)
-    sample_stack(imgs_to_process)
-
-
+    #slice thickness: 2.000
+    # pixel spacing (row, col): (0.402344, 0.402344)
 
 if __name__ == '__main__':
     main()
