@@ -1,109 +1,70 @@
-import numpy as np
-import pydicom
 import os
+import numpy
+import SimpleITK
 import matplotlib.pyplot as plt
-from glob import glob
-# from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-# import scipy.ndimage
-# from skimage import morphology
-# from skimage import measure
-# from skimage.transform import resize
-# from sklearn.cluster import KMeans
-# from plotly import __version__
-# from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
-# from plotly.tools import FigureFactory as FF
-# from plotly.graph_objs import *
 
 
-def load_scan(path):
+def sitk_show(img, title=None, margin=0.05, dpi=40):
     """
-    Loop over the image files and store everything into a list
+    This function uses matplotlib.pyplot to quickly visualize a 2D SimpleITK.Image object under the img parameter.
 
-    :param path: String of the input to be taken in
-    :return: list of DICOM filedataset types encompassing the scan
-    """
-    slices = [pydicom.read_file(path + '/' + s) for s in os.listdir(path)]
-    slices.sort(key=lambda x: int(x.InstanceNumber))
-    try:
-        slice_thickness = np.abs(slices[0].ImagePositionPatient[2] - slices[1].ImagePositionPatient[2])
-    except:
-        slice_thickness = np.abs(slices[0].SliceLocation - slices[1].SliceLocation)
-    for s in slices:
-        s.SliceThickness = slice_thickness
-
-    print("Slice Thickness: %f" % slices[0].SliceThickness)
-    print("Pixel Spacing (row, col): (%f, %f) " % (slices[0].PixelSpacing[0], slices[0].PixelSpacing[1]))
-    return slices
-
-def get_pixels_hu(scans):
-    """
-    Read in a list of scans and parse the pixels from thems
-
-    :param scans: list of scans to be taken in
-    :return: np.array of the image pixels
-    """
-    image = np.stack([s.pixel_array for s in scans])
-    # Convert to int16 (from sometimes int16),
-    # should be possible as values should always be low enough (<32k)
-    image = image.astype(np.int16)
-
-    # Set outside-of-scan pixels to 1
-    # The intercept is usually -1024, so air is approximately 0
-    image[image == -2000] = 0
-
-    # Convert to Hounsfield units (HU)
-    intercept = scans[0].RescaleIntercept
-    slope = scans[0].RescaleSlope
-
-    if slope != 1:
-        image = slope * image.astype(np.float64)
-        image = image.astype(np.int16)
-
-    image += np.int16(intercept)
-
-    return np.array(image, dtype=np.int16)
-
-
-def pre_process(data_path, output_path):
-    patient = load_scan(data_path)
-    imgs = get_pixels_hu(patient)
-    np.save(output_path + "fullimages.npy", imgs)
-
-
-def show_houndsfield_hist(imgs_to_process):
-    """
-    Graphs a histogram of the different houndsfield units contained in our images
-
-    :param imgs_to_process:
+    :param img:
+    :param title:
+    :param margin:
+    :param dpi:
     :return:
     """
-    plt.hist(imgs_to_process.flatten(), bins=50, color='c')
-    plt.xlabel("Hounsfield Units (HU)")
-    plt.ylabel("Frequency")
-    plt.show()
+    nda = SimpleITK.GetArrayFromImage(img)
+    spacing = img.GetSpacing()
+    figsize = (1 + margin) * nda.shape[0] / dpi, (1 + margin) * nda.shape[1] / dpi
+    extent = (0, nda.shape[1] * spacing[1], nda.shape[0] * spacing[0], 0)
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    ax = fig.add_axes([margin, margin, 1 - 2 * margin, 1 - 2 * margin])
 
+    plt.set_cmap("gray")
+    ax.imshow(nda, extent=extent, interpolation=None)
 
-def sample_stack(stack, rows=8, cols=8, start_with=0, show_every=1):
-    fig,ax = plt.subplots(rows,cols,figsize=[12,12])
-    for i in range(rows*cols):
-        ind = start_with + i*show_every
-        ax[int(i/rows),int(i % rows)].set_title('slice %d' % ind)
-        ax[int(i/rows),int(i % rows)].imshow(stack[ind],cmap='gray')
-        ax[int(i/rows),int(i % rows)].axis('off')
+    if title:
+        plt.title(title)
+
     plt.show()
 
 
 def main():
-    data_path = "./Inputs/full/"
-    output_path = "./Outputs/full/"
-    g = glob(data_path + '/*.dcm')
+    # Directory where the DICOM files are being stored (in this
+    # case the 'MyHead' folder).
+    # pathDicom = "./Inputs/full/IM-0001-0049.dcm"
+    pathDicom = './Inputs/valve.nrrd'
 
-    slices = load_scan(data_path)
-    print(slices[0].SliceThickness)
-    file_used = output_path + "fullimages.npy"
-    imgs_to_process = np.load(file_used).astype(np.float64)
-    #slice thickness: 2.000
-    # pixel spacing (row, col): (0.402344, 0.402344)
+    # Z slice of the DICOM files to process. In the interest of
+    # simplicity, segmentation will be limited to a single 2D
+    # image but all processes are entirely applicable to the 3D image
+    idxSlice = 50
+
+    # int labels to assign to the segmented white and gray matter.
+    # These need to be different integers but their values themselves
+    # don't matter
+    labelWhiteMatter = 1
+    labelGrayMatter = 2
+
+    reader = SimpleITK.ImageSeriesReader()
+    filenamesDICOM = reader.GetGDCMSeriesFileNames(pathDicom)
+    reader.SetFileNames(filenamesDICOM)
+    imgOriginal = reader.Execute()
+
+    imgOriginal = imgOriginal[:, :, idxSlice]
+    sitk_show(imgOriginal)
+
+    imgSmooth = SimpleITK.CurvatureFlow(image1=imgOriginal,
+                                        timeStep=0.125,
+                                        numberOfIterations=5)
+
+    # blurFilter = SimpleITK.CurvatureFlowImageFilter()
+    # blurFilter.SetNumberOfIterations(5)
+    # blurFilter.SetTimeStep(0.125)
+    # imgSmooth = blurFilter.Execute(imgOriginal)
+
+    sitk_show(imgSmooth)
 
 if __name__ == '__main__':
     main()
