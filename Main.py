@@ -14,6 +14,7 @@ def sitk_show(img, title=None, margin=0.05, dpi=40):
     :param dpi:
     :return:
     """
+
     nda = SimpleITK.GetArrayFromImage(img)
     spacing = img.GetSpacing()
     figsize = (1 + margin) * nda.shape[0] / dpi, (1 + margin) * nda.shape[1] / dpi
@@ -32,14 +33,12 @@ def sitk_show(img, title=None, margin=0.05, dpi=40):
 
 def main():
     # Directory where the DICOM files are being stored (in this
-    # case the 'MyHead' folder).
-    # pathDicom = "./Inputs/full/IM-0001-0049.dcm"
-    pathDicom = './Inputs/valve.nrrd'
+    pathDicom = './Inputs/valve'
 
     # Z slice of the DICOM files to process. In the interest of
     # simplicity, segmentation will be limited to a single 2D
     # image but all processes are entirely applicable to the 3D image
-    idxSlice = 50
+    idxSlice = 25
 
     # int labels to assign to the segmented white and gray matter.
     # These need to be different integers but their values themselves
@@ -52,19 +51,41 @@ def main():
     reader.SetFileNames(filenamesDICOM)
     imgOriginal = reader.Execute()
 
-    imgOriginal = imgOriginal[:, :, idxSlice]
-    sitk_show(imgOriginal)
+    print(imgOriginal.GetDimension())
+    print(imgOriginal.GetDepth())
+    print(imgOriginal.GetHeight())
+    print(imgOriginal.GetDirection())
+    print(imgOriginal.GetSpacing())
+    print(imgOriginal.GetOrigin())
+    imgOriginal.SetOrigin((0, 0, 0))
+    print(imgOriginal.GetOrigin())
+    print(type(imgOriginal) == SimpleITK.SimpleITK.Image)
 
+    imgOriginal = imgOriginal[:, :, idxSlice]
     imgSmooth = SimpleITK.CurvatureFlow(image1=imgOriginal,
                                         timeStep=0.125,
-                                        numberOfIterations=5)
+                                        numberOfIterations=10)
 
     # blurFilter = SimpleITK.CurvatureFlowImageFilter()
     # blurFilter.SetNumberOfIterations(5)
     # blurFilter.SetTimeStep(0.125)
     # imgSmooth = blurFilter.Execute(imgOriginal)
 
-    sitk_show(imgSmooth)
+    # sitk_show(imgSmooth)
+
+    lstSeeds = [(30, 30)]
+
+    imgWhiteMatter = SimpleITK.ConnectedThreshold(image1=imgSmooth,
+                                                  seedList=lstSeeds,
+                                                  lower=350,
+                                                  upper=1000,
+                                                  replaceValue=labelWhiteMatter)
+
+    # Rescale 'imgSmooth' and cast it to an integer type to match that of 'imgWhiteMatter'
+    imgSmoothInt = SimpleITK.Cast(SimpleITK.RescaleIntensity(imgSmooth), imgWhiteMatter.GetPixelID())
+
+    # Use 'LabelOverlay' to overlay 'imgSmooth' and 'imgWhiteMatter'
+    sitk_show(SimpleITK.LabelOverlay(imgSmoothInt, imgWhiteMatter))
 
 if __name__ == '__main__':
     main()
