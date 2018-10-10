@@ -1,5 +1,4 @@
-import os
-import numpy
+import dicom2stl
 import SimpleITK
 import matplotlib.pyplot as plt
 
@@ -76,6 +75,7 @@ def main():
 
     imgWhiteMatter = SimpleITK.ConnectedThreshold(image1=imgSmooth,
                                                   seedList=lstSeeds,
+                                                  # May want to adjust lower
                                                   lower=300,
                                                   upper=459,
                                                   replaceValue=labelWhiteMatter)
@@ -83,13 +83,23 @@ def main():
     # Rescale 'imgSmooth' and cast it to an integer type to match that of 'imgWhiteMatter'
     imgSmoothInt = SimpleITK.Cast(SimpleITK.RescaleIntensity(imgSmooth), imgWhiteMatter.GetPixelID())
 
-    for i in range(imgOriginal.GetDepth()):
-        imgWhiteMatterSingle = imgWhiteMatter[:, :, i]
-        imgSmoothIntSingle = imgSmoothInt[:, :, i]
-        # Use 'LabelOverlay' to overlay 'imgSmooth' and 'imgWhiteMatterSingle'
-        sitk_show(SimpleITK.LabelOverlay(imgSmoothIntSingle, imgWhiteMatterSingle))
-        # sitk_show(imgSmoothIntSingle)
-    plt.show()
+
+    imgWhiteMatterNoHoles = SimpleITK.VotingBinaryHoleFilling(image1=imgWhiteMatter,
+                                                              radius=[2] * 3,
+                                                              majorityThreshold=1,
+                                                              backgroundValue=0,
+                                                              foregroundValue=labelWhiteMatter)
+
+    dicom2stl.img_to_stl(imgWhiteMatterNoHoles)
+    # for i in range(imgOriginal.GetDepth()):
+    #     imgWhiteMatterSingle = imgWhiteMatter[:, :, i]
+    #     imgSmoothIntSingle = imgSmoothInt[:, :, i]
+    #     imgWhiteMatterNoHolesSingle = imgWhiteMatterNoHoles[:, :, i]
+    #     # Use 'LabelOverlay' to overlay 'imgSmooth' and 'imgWhiteMatterSingle'
+    #     print(type(imgWhiteMatterNoHoles))
+    #     sitk_show(SimpleITK.LabelOverlay(imgSmoothIntSingle, imgWhiteMatterNoHolesSingle))
+    #     # sitk_show(imgSmoothIntSingle)
+    # plt.show()
 
 
 if __name__ == '__main__':
