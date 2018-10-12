@@ -18,7 +18,8 @@ def extractSurface(vol, isovalue=0.0):
         mesh = iso.GetOutput()
         print("    ", mesh.GetNumberOfPolys(), "polygons")
         return mesh
-    except:
+    except Exception as e:
+        print(e)
         print("Iso-surface extraction failed")
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback.print_exception(
