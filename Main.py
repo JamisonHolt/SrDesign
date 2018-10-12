@@ -228,6 +228,7 @@ def main():
     imgWhiteMatter = sitk.ConnectedThreshold(image1=imgSmooth, seedList=edgeSeeds, lower=200, upper=470, replaceValue=labelWhiteMatter)
     bloodSeeds = [(23, 35, 23)]
     imgBlood = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
+    imgBloodDupe = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
     # imgBlood = sitk.ConnectedThreshold(image1=imgSmooth, seedList=bloodSeeds, lower=257, upper=1000, replaceValue=labelWhiteMatter)
     imgSmoothInt = sitk.Cast(sitk.RescaleIntensity(imgSmooth), imgWhiteMatter.GetPixelID())
     imgWhiteMatterNoHoles = sitk.VotingBinaryHoleFilling(image1=imgWhiteMatter, radius=[2] * 3, majorityThreshold=1, backgroundValue=0, foregroundValue=labelWhiteMatter)
@@ -263,6 +264,7 @@ def main():
                     imgBlood.SetPixel(x, y, z, 0)
 
     safePoints = getSafePoints(islands)
+    safePoints2 = getSafePoints(sitk.GetArrayFromImage(imgBloodDupe), radius=2, threshold=25)
 
 
 
@@ -273,7 +275,7 @@ def main():
         imgBloodSingle = imgBlood[:, :, i]
         for y in range(len(safePoints)):
             for x in range(len(safePoints[y])):
-                if not safePoints[y][x]:
+                if not (safePoints[y][x] == 1 and safePoints2[y][x] == 1):
                     imgBloodSingle.SetPixel(x, y, 0)
         imgMaskedSingle = imgMasked[:, :, i]
         # Use 'LabelOverlay' to overlay 'imgSmooth' and 'imgWhiteMatterSingle'
