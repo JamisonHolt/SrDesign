@@ -1,9 +1,10 @@
 import dicom2stl
 import numpy as np
+import pandas as pd
 import time
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
-import sys
+from sklearn.cluster import KMeans
 
 
 def sitk_show(img, title=None, margin=0.05, dpi=40):
@@ -229,6 +230,7 @@ def main():
     bloodSeeds = [(23, 35, 23)]
     imgBlood = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
     imgBloodDupe = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
+    imgBlood3 = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
     # imgBlood = sitk.ConnectedThreshold(image1=imgSmooth, seedList=bloodSeeds, lower=257, upper=1000, replaceValue=labelWhiteMatter)
     imgSmoothInt = sitk.Cast(sitk.RescaleIntensity(imgSmooth), imgWhiteMatter.GetPixelID())
     imgWhiteMatterNoHoles = sitk.VotingBinaryHoleFilling(image1=imgWhiteMatter, radius=[2] * 3, majorityThreshold=1, backgroundValue=0, foregroundValue=labelWhiteMatter)
@@ -265,27 +267,62 @@ def main():
 
     safePoints = getSafePoints(islands)
     safePoints2 = getSafePoints(sitk.GetArrayFromImage(imgBloodDupe), radius=2, threshold=25)
-
-
-
-    for i in range(imgOriginal.GetHeight()):
-        imgWhiteMatterSingle = imgWhiteMatter[:, :, i]
-        imgSmoothIntSingle = imgSmoothInt[:, :, i]
-        imgWhiteMatterNoHolesSingle = imgWhiteMatterNoHoles[:, :, i]
-        imgBloodSingle = imgBlood[:, :, i]
+    for z in range(imgOriginal.GetHeight()):
         for y in range(len(safePoints)):
             for x in range(len(safePoints[y])):
-                if not (safePoints[y][x] == 1 and safePoints2[y][x] == 1):
-                    imgBloodSingle.SetPixel(x, y, 0)
-        imgMaskedSingle = imgMasked[:, :, i]
-        # Use 'LabelOverlay' to overlay 'imgSmooth' and 'imgWhiteMatterSingle'
-        # sitk_show(sitk.LabelOverlay(imgSmoothIntSingle, imgWhiteMatterNoHolesSingle))
-        # sitk_show(sitk.LabelOverlay(imgSmoothIntSingle, imgBloodSingle))
-        sitk_show(sitk.LabelOverlay(imgSmoothIntSingle, imgBloodSingle))
-        # sitk_show(imgBloodSingle)
-        # sitk_show(imgSmoothIntSingle)
-        # sitk_show(imgWhiteMatterNoHolesSingle)
+                if not(safePoints[y][x] == 1 and safePoints2[y][x] == 1):
+                    imgBlood.SetPixel(x, y, z, 0)
 
+    bloodMatrix = sitk.GetArrayFromImage(imgBlood)
+    X = {'x': [], 'y': [], 'z': []}
+    for z in range(imgOriginal.GetHeight()):
+        for y in range(len(safePoints)):
+            for x in range(len(safePoints[y])):
+                if bloodMatrix[z][y][x]:
+                    X['x'].append(x)
+                    X['y'].append(y)
+                    X['z'].append(z)
+    X = pd.DataFrame.from_dict(X)
+    zog = X['z']
+    X['z'] = X['z'] / 39
+    fit = KMeans(n_clusters=2, random_state=0).fit(X)
+    labels = fit.labels_
+    X['label'] = pd.Series(labels)
+
+    for z in range(imgOriginal.GetHeight()):
+        for y in range(len(safePoints)):
+            for x in range(len(safePoints[y])):
+                imgBlood.SetPixel(x, y, z, 0)
+
+    X['z'] = zog
+    for index, row in X.iterrows():
+        x, y, z, label = (row['x'], row['y'], row['z'], row['label'])
+        if label == 0:
+            imgBlood.SetPixel(int(x), int(y), z, 1)
+
+    for z in range(imgOriginal.GetHeight()):
+        imgSmoothIntSingle = imgSmoothInt[:, :, z]
+        imgBloodSingle = imgBlood[:, :, z]
+        imgBloodSingle3 = imgBlood3[:, :, z]
+
+        df = {'x': [], 'y': []}
+        for y in range(len(safePoints)):
+            for x in range(len(safePoints[y])):
+                if imgBloodSingle.GetPixel(x, y):
+                    df['x'].append(x)
+                    df['y'].append(y)
+        df = pd.DataFrame.from_dict(df)
+        if df.shape[0] > 4:
+            fit = KMeans(n_clusters=2, random_state=0).fit(df)
+            labels = fit.labels_
+            df['label'] = pd.Series(labels)
+
+            for index, row in df.iterrows():
+                x, y, label = (row['x'], row['y'], row['label'])
+                if label == 1:
+                    imgBloodSingle.SetPixel(int(x), int(y), z, 0)
+
+            sitk_show(sitk.LabelOverlay(imgSmoothIntSingle, imgBloodSingle))
     plt.show()
 
 if __name__ == '__main__':
