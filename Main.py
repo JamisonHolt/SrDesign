@@ -294,7 +294,7 @@ def main():
     img_smooth = img_smooth[:, :, start:end]
     labels_valve_filtered = labels_valve_filtered[:, :, start:end]
 
-    # Remove all values distant from the center of our starting location by taking advantage of kmeans again
+    # Remove all values distant from the center of our starting location by taking advantage of kmeans
     df = get_df_from_img(labels_valve_filtered[:, :, 0], dimensions=2)
     x_mid = df['x'].mean()
     y_mid = df['y'].mean()
@@ -328,35 +328,38 @@ def main():
     zlen = len(sitk.GetArrayFromImage(left))
     for z in xrange(zlen):
         left_df = get_df_from_img(left[:, :, z], dimensions=2)
-        right_df = get_df_from_img(right[:, :, z], dimensions=2)
-        left_df['x_dist'] = (left_df['x'] - x_mid) ** 2
-        right_df['x_dist'] = (right_df['x'] - x_mid) ** 2
-        left_df['y_dist'] = (left_df['y'] - y_mid) ** 2
-        right_df['y_dist'] = (right_df['y'] - y_mid) ** 2
-        left_df['dist'] = np.sqrt(left_df['x_dist'] + left_df['y_dist'])
-        right_df['dist'] = np.sqrt(right_df['x_dist'] + right_df['y_dist'])
-
-        if len(left_df['dist']) > 0:
-            index = left_df['dist'].idxmax()
+        if len(left_df['y']) > 0:
+            index = left_df['y'].idxmin()
             row = left_df.iloc[index]
-            left_points['x'].append(row['x'])
-            left_points['y'].append(row['y'])
+            left_points['x'].append(int(row['x']))
+            left_points['y'].append(int(row['y']))
             left_points['z'].append(z)
 
-        if len(right_df['dist']) > 0:
-            index = right_df['dist'].idxmax()
+        right_df = get_df_from_img(right[:, :, z], dimensions=2)
+        if len(right_df['x']) > 0:
+            index = right_df['x'].idxmax()
             row = right_df.iloc[index]
-            right_points['x'].append(row['x'])
-            right_points['y'].append(row['y'])
+            right_points['x'].append(int(row['x']))
+            right_points['y'].append(int(row['y']))
             right_points['z'].append(z)
 
+    # These both represent the coordinates of our annulus ring. A simple spline can be used for interpolation between
+    #   points
     final_left = pd.DataFrame.from_dict(left_points)
     final_right = pd.DataFrame.from_dict(right_points)
     print('Coordinates for one side of the ring')
     print(final_left)
     print('\n\nCoordinates for the other side of the ring')
     print(final_right)
-    # show_all(img_smooth, left)
+
+    final_image = make_empty_img_from_img(left)
+    x = left_points['x'] + right_points['x']
+    y = left_points['y'] + right_points['y']
+    z = left_points['z'] + right_points['z']
+    for x, y, z in zip(x, y, z):
+        final_image.SetPixel(x, y, z, 1)
+
+    show_all(img_smooth, final_image)
 
 
 if __name__ == '__main__':
