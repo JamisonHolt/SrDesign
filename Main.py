@@ -1,23 +1,19 @@
-import dicom2stl
 import numpy as np
 import pandas as pd
-import time
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
+from sklearn import cluster
 
 
-def sitk_show(img, title=None, margin=0.05, dpi=40):
+def show_one(img):
     """
-    This function uses matplotlib.pyplot to quickly visualize a 2D sitk.Image object under the img parameter.
+    Display a single 2D image without calling plt.show() to open in the browser
 
-    :param img:
-    :param title:
-    :param margin:
-    :param dpi:
-    :return:
+    :param img: The 2D image to be shown
+    :return: None
     """
-
+    dpi = 40
+    margin = 0.05
     nda = sitk.GetArrayFromImage(img)
     spacing = img.GetSpacing()
     extent = (0, nda.shape[1] * spacing[1], nda.shape[0] * spacing[0], 0)
@@ -28,302 +24,340 @@ def sitk_show(img, title=None, margin=0.05, dpi=40):
     plt.set_cmap("gray")
     ax.imshow(nda, extent=extent, interpolation=None)
 
-    if title:
-        plt.title(title)
+
+def show_all(img, overlay=None, axis='z'):
+    """
+    Take in all images and display them in the browser on any given axis
+
+    :param img: The image to be displayed
+    :param overlay: Any overlay of labels that one might want displayed. Defaults to none
+    :param axis: The axis in which to graph each image. Defaults to z
+    :return: None
+    """
+    xlen, ylen, zlen = img.GetSize()
+    all_images = []
+    all_overlays = []
+    if axis == 'z':
+        all_images = [img[:, :, z] for z in xrange(zlen)]
+        if overlay:
+            all_overlays = [overlay[:, :, z] for z in xrange(zlen)]
+    elif axis == 'y':
+        all_images = [img[:, y, :] for y in xrange(ylen)]
+        if overlay:
+            all_overlays = [overlay[:, y, :] for y in xrange(ylen)]
+    elif axis == 'x':
+        all_images = [img[x, :, :] for x in xrange(xlen)]
+        if overlay:
+            all_overlays = [overlay[x, :, :] for x in xrange(xlen)]
+    else:
+        raise Exception('invalid axis')
+
+    for i, image in enumerate(all_images):
+        if overlay:
+            show_one(sitk.LabelOverlay(image, all_overlays[i]))
+        else:
+            show_one(image)
+    plt.show()
 
 
-def writeImage(img, reader, path):
-    writer = sitk.ImageFileWriter()
-    writer.KeepOriginalImageUIDOn()
-    modification_time = time.strftime("%H%M%S")
-    modification_date = time.strftime("%Y%m%d")
-    direction = img.GetDirection()
+def make_empty_img_from_img(img, dimensions=3):
+    """
+    Take an exising itk image and create a new, empty image from its dimensions
 
-    series_tag_values = [
-        ("0010|0010", "Test1"),  # Patient Name
-        ("0010|0020", "Test1"),  # Patient ID
-        ("0010|0030", "20060101"),  # Patient Birth Date
-        ("0020|000D", "1.2.826.0.1.3680043.2.1125.1.94286748084135693443502286530644958"),  # Study Instance UID, for machine consumption
-        ("0020|0010", "SLICER100011"),  # Study ID, for human consumption
-        ("0008|0020", "20060101"),  # Study Date
-        ("0008|0030", "010100.000000"),  # Study Time
-        ("0008|0050", "1"),  # Accession Number
-        ("0008|0060", "CT"),  # Modality
-        ("0008|0031", modification_time),  # Series Time
-        ("0008|0021", modification_date),  # Series Date
-        ("0008|0008", "DERIVED\\SECONDARY"),  # Image Type
-        ("0020|000e", "1.2.826.0.1.3680043.2.1125." + modification_date + ".1" + modification_time),
-        # Series Instance UID
-        ("0020|0037",
-        '\\'.join(map(str, (direction[0], direction[3], direction[6],  # Image Orientation (Patient)
-            direction[1], direction[4], direction[7])))),
-        ("0008|103e", "Processed Image")]  # Series Description
-    for i in range(img.GetDepth()):
-        image_slice = img[:,:,i]
-        # Tags shared by the series.
-        for tag, value in series_tag_values:
-            image_slice.SetMetaData(tag, value)
-        # Slice specific tags.
-        image_slice.SetMetaData("0008|0012", time.strftime("%Y%m%d")) # Instance Creation Date
-        image_slice.SetMetaData("0008|0013", time.strftime("%H%M%S")) # Instance Creation Time
-        image_slice.SetMetaData("0020|0032", '\\'.join(map(str,img.TransformIndexToPhysicalPoint((0,0,i))))) # Image Position (Patient)
-        image_slice.SetMetaData("0020|0013", str(i)) # Instance Number
-
-        # Write to the output directory and add the extension dcm, to force writing in DICOM format.
-        writer.SetFileName(path + 'output' + str(i)+'.dcm')
-        writer.Execute(image_slice)
-
-def getSafePoints(grid, radius=8, threshold=15):
-    heatMap = np.zeros((len(grid[0]), len(grid[0][0])))
-    safePoints = np.copy(heatMap);
-    for z in range(len(grid)):
-        for y in range(len(grid[z])):
-            for x in range(len(grid[z][y])):
-                heatMap[y][x] += grid[z][y][x]
-                # if z == 0 or y == 0 or x == 0 or z == (len(grid) - 1) or y == (len(grid[z]) - 1) or x == (len(grid[z][y]) - 1):
-                #     grid[z][y][x] = 0
-                # elif not(grid[z+1][y][x] or grid[z][y+1][x] or grid[z][y-1][x] or grid[z][y][x+1] or grid[z][y][x-1]):
-                #     grid[z][y][x] = 0
-    for y in range(len(heatMap)):
-        for x in range(len(heatMap[y])):
-            if heatMap[y][x] >= threshold:
-                lowX = x - radius if x >= radius else 0
-                lowY = y - radius if y >= radius else 0
-                highX = x + radius if x < len(heatMap[y]) else len(heatMap[y]) - 1
-                highY = y + radius if y < len(heatMap) else len(heatMap) - 1
-                safePoints[lowY:highY, lowX:highX] = 1
-    return safePoints
+    :param img: The image to find dimensions for
+    :param dimensions: The number of dimensions in the image
+    :return: The new image
+    """
+    xlen, ylen, zlen = img.GetSize()
+    dupe = img[:, :, :]
+    for x in xrange(xlen):
+        for y in xrange(ylen):
+            if dimensions == 3:
+                for z in xrange(zlen):
+                    dupe.SetPixel(x, y, z, 0)
+            else:
+                dupe.SetPixel(x, y, 0)
+    return dupe
 
 
-def labelIslands(grid):
-    visited = np.zeros((len(grid[0]), len(grid[0][0])))
-    def recur(plane, loc, label):
-        row, col = loc
-        if row < 0 or col < 0 or row == len(plane) or col == len(plane[0]):
-            return
-        if (visited[row][col]):
-            return
-        visited[row][col] = 1
-        if plane[row][col] == 1:
-            plane[row][col] = label
-            recur(plane, (row - 1, col), label)
-            recur(plane, (row + 1, col), label)
-            recur(plane, (row, col - 1), label)
-            recur(plane, (row, col + 1), label)
-    label = 2
-    gridCopy = np.copy(grid)
-    heightMap = {}
-    for z, plane in enumerate(gridCopy):
-        for y in range(len(plane)):
-            for x in range(len(plane[y])):
-                if plane[y][x] == 1:
-                    recur(plane, (y, x), label)
-                    heightMap[label] = z
-                    label += 1
-        visited[:, :] = 0
-    return gridCopy, heightMap
+def read_image(path):
+    """
+    Read in a list of dcm images in a given directory
+
+    :param path: system path towards the directory
+    :return: sitk image with the origin reset to 0, 0, 0
+    """
+    reader = sitk.ImageSeriesReader()
+    dicom_filenames = reader.GetGDCMSeriesFileNames(path)
+    reader.SetFileNames(dicom_filenames)
+    reader.LoadPrivateTagsOn()
+    img = reader.Execute()
+    img.SetOrigin((0, 0, 0))
+    return img
 
 
-def getHouse(top, bottom, columns, connectedSets):
-    house = set([top, bottom])
-    for colIndex in connectedSets:
-        if colIndex in columns and bottom in columns[colIndex]:
-            house.add(colIndex)
-    return house
+def retrieve_overlap(img1, img2, lbl1=1, lbl2=1):
+    """
+    Take in two images of labels and return an image with only the overlap of the labels
 
-def buildHouses(grid, heightMap):
-    islands = set()
-    columns = {}
-    houses = []
-    for y in range(len(grid[0])):
-        for x in range(len(grid[0][y])):
-            label = grid[0][y][x]
-            if label:
-                islands.add(label)
-    for z in range(1, len(grid)):
-    # for z in range(1, 5):
-        isleReferenceCount = {}
-        newColumns = {}
-        newIslands = set()
-        for y in range(len(grid[z])):
-            for x in range(len(grid[z][y])):
-                label = grid[z][y][x]
-                below = grid[z-1][y][x]
-                # All labels are islands for the purposes of this code, even if also columns
-                if label:
-                    newIslands.add(label)
-                # If label is a column to an island below
-                if label and below:
-                    # Check if previously added to columns
-                    if label not in newColumns:
-                        newColumns[label] = set()
-                    # Check if below is a column
-                    if below in columns:
-                        newColumns[label] = newColumns[label].union(columns[below])
-                        newColumns[label].add(below)
-                    # Case that below is simply an island
-                    elif below in islands and below not in newColumns[label]:
-                        # Add column to our dictionary
-                        newColumns[label].add(below)
-                        # keep count of times island referenced - we only care about (2+)-referenced islands
-                        if below not in isleReferenceCount:
-                            isleReferenceCount[below] = 0
-                        isleReferenceCount[below] += 1
-                        # filter and merge newColumns with old Columns
+    :param img1: The first image of labels
+    :param img2: The second image of labels
+    :param lbl1: The label to retrieve from the first image
+    :param lbl2: The label to retrieve from the second image
+    :return: A new image of labels where overlap exists
+    """
+    xlen, ylen, zlen = img1.GetSize()
 
-        for isle, count in isleReferenceCount.items():
-            # Remove all islands with fewer than 2 columns bc they aren't contenders
-            for islandTop, islandsBot in newColumns.items():
-                if count < 2 and isle in islandsBot:
-                    islandsBot.remove(isle)
-                    # Check if any purpose to
-                    if len(islandsBot) == 0:
-                        newColumns.pop(islandTop)
+    # Make sure that our images are equal in size to prevent weird invisible bugs
+    xlen2, ylen2, zlen2 = img2.GetSize()
+    assert xlen == xlen2 and ylen == ylen2 and zlen == zlen2
 
-        ceilingToFloor = {}
+    # Copy our image as to not alter the original data
+    new_image = img1[:, :, :]
+    for z in xrange(zlen):
+        for y in xrange(ylen):
+            for x in xrange(xlen):
+                # Set any bit with overlap to 1, else set it to 0
+                overlap = img1.GetPixel(x, y, z) == lbl1 and img2.GetPixel(x, y, z) == lbl2
+                if overlap:
+                    new_image.SetPixel(x, y, z, 1)
+                else:
+                    new_image.SetPixel(x, y, z, 0)
+    return new_image
 
-        for islandTop, islandsBot in newColumns.items():
-            # Find all ceilings connected to a floor by at least 2 separate columns
-            if len(islandsBot) > 2:
-                childSets = [columns[i] if i in columns else set() for i in islandsBot]
-                numIntersections = {}
-                for childSet in childSets:
-                    # find the floor connected to this ceiling
-                    for island in childSet:
-                        if island not in numIntersections:
-                            numIntersections[island] = 0
-                        numIntersections[island] += 1
-                        if numIntersections[island] > 1:
-                            ceilingToFloor[islandTop] = island
-                house = getHouse(islandTop, island, columns, islandsBot)
-                if min(house) != 1:
-                    houses.append((heightMap[max(house)] - heightMap[min(house)], house))
-        islands = newIslands
-        columns.update(newColumns)
-    return houses
+
+def get_df_from_img(img, dimensions=3):
+    """
+    Create a pandas dataframe from any given image - useful for statistics operations such as clustering
+
+    :param img: The image to be converted into a dataframe
+    :param dimensions: The number of dimensions of the image - only supports 2D and 3D images at the moment
+    :return: A pandas dataframe containing the x, y, and z coordinates that exist in the image
+    """
+    if dimensions == 3:
+        df_dict = {'x': [], 'y': [], 'z': []}
+        xlen, ylen, zlen = img.GetSize()
+        for x in xrange(xlen):
+            for y in xrange(ylen):
+                for z in xrange(zlen):
+                    if img.GetPixel(x, y, z):
+                        df_dict['x'].append(x)
+                        df_dict['y'].append(y)
+                        df_dict['z'].append(z)
+        df = pd.DataFrame.from_dict(df_dict)
+        return df
+    elif dimensions == 2:
+        df_dict = {'x': [], 'y': []}
+        xlen, ylen = img.GetSize()
+        for x in xrange(xlen):
+            for y in xrange(ylen):
+                if img.GetPixel(x, y):
+                    df_dict['x'].append(x)
+                    df_dict['y'].append(y)
+        df = pd.DataFrame.from_dict(df_dict)
+        return df
+    else:
+        raise Exception('Unsupported number of dimensions')
+
+
+def update_img_from_df(df, image, keep=0, dimensions=3, colname='label', inside_value=1, outside_value=0):
+    """
+    Take a given dataframe and itk image to be written over and update the image to only contain the labeled coordinates
+
+    :param df: The dataframe to read labels from
+    :param image: The image to be overwritten
+    :param keep: The label in the dattaframe to keep (since there may be multiple labels, e.g. clustering
+    :param dimensions: The number of dimensions in the image
+    :param colname: The name of the column containing the labels
+    :param inside_value: What to update labeled pixels to
+    :param outside_value: What to update unlabeled pixels to
+    :return: None
+    """
+    for index, row in df.iterrows():
+        if dimensions == 2:
+            x, y, label = (row['x'], row['y'], row[colname])
+            if label == keep:
+                image.SetPixel(x, y, inside_value)
+            else:
+                image.SetPixel(x, y, outside_value)
+        elif dimensions == 3:
+            x, y, z, label = (row['x'], row['y'], row['z'], row[colname])
+            if label == keep:
+                image.SetPixel(x, y, z, inside_value)
+            else:
+                image.SetPixel(x, y, z, outside_value)
+        else:
+            raise Exception('Unsupported number of dimensions')
+
+
+def dbscan_filter(img, eps, use_z=True):
+    df = get_df_from_img(img)
+    df_new = df
+    if not use_z:
+        df_new = df.drop('z', axis=1)
+    fit = cluster.DBSCAN(eps=eps).fit(df_new)
+    labels = fit.labels_
+    df['label'] = pd.Series(labels)
+    counts = df['label'].value_counts().to_dict()
+    # Remove all non-clusters
+    df = df[df.label != -1]
+    largest_cluster = max(counts.iterkeys(), key=(lambda key: counts[key]))
+    img_filtered = make_empty_img_from_img(img)
+    update_img_from_df(df, img_filtered, keep=largest_cluster)
+    return img_filtered
+
+
+def kmeans_segment(img, num_segments=2, use_z=True):
+    df = get_df_from_img(img)
+    df_new = df
+    if not use_z:
+        df_new = df.drop('z', axis=1)
+    fit = cluster.KMeans(n_clusters=num_segments).fit(df_new)
+    labels = fit.labels_
+    df['label'] = pd.Series(labels)
+    all_images = [make_empty_img_from_img(img) for i in xrange(num_segments)]
+    x_max = [0 for i in xrange(num_segments)]
+    for index, row in df.iterrows():
+        x, y, z, label = (row['x'], row['y'], row['z'], row['label'])
+        all_images[label].SetPixel(x, y, z, 1)
+        x_max[label] = max((x_max[label], x))
+    return all_images, x_max
+
+
+def count_labels(img):
+    xlen, ylen = img.GetSize()
+    count = 0
+    for x in xrange(xlen):
+        for y in xrange(ylen):
+            if img.GetPixel(x, y):
+                count += 1
+    return count
+
+
+def filter_by_label_count(img, threshold):
+    start = 0
+    arr = sitk.GetArrayFromImage(img)
+    end = len(arr)
+    for z in xrange(end):
+        img_single = img[:, :, z]
+        if count_labels(img_single) < threshold:
+            if z == start:
+                start += 1
+    for z in reversed(xrange(end)):
+        img_single = img[:, :, z]
+        if count_labels(img_single) < threshold:
+            if z == end - 1:
+                end -= 1
+    return start, end
+
+
+
 
 def main():
+    """
+    Main function of our program. Executes all of the main steps written in our final paper
+
+    :return: None
+    """
     # Directory where the DICOM files are being stored (in this
-    pathDicom = './Inputs/valve'
-    pathOutput = './Outputs/valve/'
+    input_path = './Inputs/valve'
 
-    # int labels to assign to the segmented white and gray matter.
-    # These need to be different integers but their values themselves
-    # don't matter
-    labelWhiteMatter = 1
+    # Original image from the filepath
+    img_original = read_image(input_path)
 
-    reader = sitk.ImageSeriesReader()
-    seriesID = reader.GetGDCMSeriesIDs(pathDicom)[0]
-    series_file_names = reader.GetGDCMSeriesFileNames(pathDicom, seriesID)
-    reader.SetFileNames(series_file_names)
-    filenamesDICOM = reader.GetGDCMSeriesFileNames(pathDicom)
-    reader.SetFileNames(filenamesDICOM)
-    reader.LoadPrivateTagsOn()
-    imgOriginal = reader.Execute()
+    # Image with smoothing applied to reduce noise
+    img_smooth = sitk.CurvatureFlow(image1=img_original, timeStep=0.125, numberOfIterations=10)
 
-    imgOriginal.SetOrigin((0, 0, 0))
+    # Create labels on our smoothed image for cardiac tissue and tissue with blood
+    labels_tissue = sitk.BinaryThreshold(image1=img_smooth, lowerThreshold=325, upperThreshold=470, insideValue=1)
+    labels_blood = sitk.BinaryThreshold(image1=img_smooth, lowerThreshold=450, upperThreshold=800, insideValue=1, outsideValue=0)
 
-    imgSmooth = sitk.CurvatureFlow(image1=imgOriginal, timeStep=0.125, numberOfIterations=10)
+    # IMPORTANT STEP: essentially, this is the key to our algorithm. By finding the "blood" without cardiac tissue,
+    #   and then using binary hole filling with a fairly large radius, we are able to label a lot of the mitral valve
+    #   area without labeling too much of the other cardiac tissue. Thus, THIS is what lets us single out the mitral
+    #   valve tissue from the rest - all we need is the overlap of the two labels
+    labels_tissue_no_holes = sitk.VotingBinaryHoleFilling(image1=labels_tissue, radius=[2] * 3, majorityThreshold=1, backgroundValue=0, foregroundValue=1)
+    labels_blood_no_holes = sitk.VotingBinaryHoleFilling(image1=labels_blood, radius=[4] * 3, majorityThreshold=1, backgroundValue=0, foregroundValue=1)
+    labels_valve = retrieve_overlap(labels_blood_no_holes, labels_tissue_no_holes)
+    labels_valve_no_holes = sitk.VotingBinaryHoleFilling(image1=labels_valve, radius=[2] * 3, majorityThreshold=1, backgroundValue=0, foregroundValue=1)
+    labels_valve_no_holes = sitk.VotingBinaryHoleFilling(image1=labels_valve_no_holes, radius=[1] * 3, majorityThreshold=0, backgroundValue=1, foregroundValue=0)
 
-    edgeSeeds = [(28, 31, 37)]
-    imgWhiteMatter = sitk.ConnectedThreshold(image1=imgSmooth, seedList=edgeSeeds, lower=200, upper=470, replaceValue=labelWhiteMatter)
-    bloodSeeds = [(23, 35, 23)]
-    imgBlood = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
-    imgBloodDupe = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
-    imgBlood3 = sitk.BinaryThreshold(image1=imgSmooth, lowerThreshold=300, upperThreshold=800, insideValue=1, outsideValue=0)
-    # imgBlood = sitk.ConnectedThreshold(image1=imgSmooth, seedList=bloodSeeds, lower=257, upper=1000, replaceValue=labelWhiteMatter)
-    imgSmoothInt = sitk.Cast(sitk.RescaleIntensity(imgSmooth), imgWhiteMatter.GetPixelID())
-    imgWhiteMatterNoHoles = sitk.VotingBinaryHoleFilling(image1=imgWhiteMatter, radius=[2] * 3, majorityThreshold=1, backgroundValue=0, foregroundValue=labelWhiteMatter)
-    imgMasked = sitk.Mask(imgSmoothInt, imgWhiteMatterNoHoles)
-    imgCoords = sitk.GetArrayFromImage(imgWhiteMatterNoHoles)
+    # Fix intensity scaling on our original smoothed image for pretty diagram purposes
+    img_smooth = sitk.Cast(sitk.RescaleIntensity(img_smooth), labels_tissue_no_holes.GetPixelID())
 
+    # Use a density-based clustering algorithm to attempt to remove as much noise as possible
+    labels_valve_filtered = dbscan_filter(labels_valve_no_holes, eps=2, use_z=False)
+    labels_valve_filtered = dbscan_filter(labels_valve_filtered, eps=4)
 
-    for z in range(len(imgCoords)):
-        for y in range(len(imgCoords[z])):
-            for x in range(len(imgCoords[z][y])):
-                overlap = imgWhiteMatterNoHoles.GetPixel(x, y, z) == 1 and imgBlood.GetPixel(x, y, z) == 1
-                if not overlap:
-                    imgBlood.SetPixel(x, y, z, 0)
+    # Find likely start and end points of our image by setting a mininum number of labeled pixels
+    start, end = filter_by_label_count(labels_valve_filtered, 10)
+    img_smooth = img_smooth[:, :, start:end]
+    labels_valve_filtered = labels_valve_filtered[:, :, start:end]
 
-    imgCoords = sitk.GetArrayFromImage(imgBlood)
-
-    islands, heightMap = labelIslands(imgCoords)
-    houses = buildHouses(islands, heightMap)
-    houses.sort()
-    height, house = houses[-1]
-    combinedHouse = set()
-    for house in houses:
-        if house[0] >= 10:
-            combinedHouse.update(house[1])
-    for z in range(len(islands)):
-        for y in range(len(islands[z])):
-            for x in range(len(islands[z][y])):
-                if islands[z][y][x] in combinedHouse:
-                    islands[z][y][x] = 1
-                    imgBlood.SetPixel(x, y, z, 1)
-                else:
-                    islands[z][y][x] = 0
-                    imgBlood.SetPixel(x, y, z, 0)
-
-    safePoints = getSafePoints(islands)
-    safePoints2 = getSafePoints(sitk.GetArrayFromImage(imgBloodDupe), radius=2, threshold=25)
-    for z in range(imgOriginal.GetHeight()):
-        for y in range(len(safePoints)):
-            for x in range(len(safePoints[y])):
-                if not(safePoints[y][x] == 1 and safePoints2[y][x] == 1):
-                    imgBlood.SetPixel(x, y, z, 0)
-
-    bloodMatrix = sitk.GetArrayFromImage(imgBlood)
-    X = {'x': [], 'y': [], 'z': []}
-    for z in range(imgOriginal.GetHeight()):
-        for y in range(len(safePoints)):
-            for x in range(len(safePoints[y])):
-                if bloodMatrix[z][y][x]:
-                    X['x'].append(x)
-                    X['y'].append(y)
-                    X['z'].append(z)
-    X = pd.DataFrame.from_dict(X)
-    zog = X['z']
-    X['z'] = X['z'] / 39
-    fit = KMeans(n_clusters=2, random_state=0).fit(X)
+    # Remove all values distant from the center of our starting location by taking advantage of kmeans again
+    df = get_df_from_img(labels_valve_filtered[:, :, 0], dimensions=2)
+    x_mid = df['x'].mean()
+    y_mid = df['y'].mean()
+    df = get_df_from_img(labels_valve_filtered)
+    distance_df = df.drop('z', axis=1)
+    distance_df['x_dist'] = abs(distance_df['x'] - x_mid)
+    distance_df['y_dist'] = abs(distance_df['y'] - y_mid)
+    fit = cluster.KMeans(n_clusters=2).fit(distance_df.drop(['x', 'y'], axis=1))
     labels = fit.labels_
-    X['label'] = pd.Series(labels)
+    df['label'] = pd.Series(labels)
+    counts = df['label'].value_counts().to_dict()
+    largest_cluster = max(counts.iterkeys(), key=(lambda key: counts[key]))
+    update_img_from_df(df, labels_valve_filtered, keep=largest_cluster)
 
-    for z in range(imgOriginal.GetHeight()):
-        for y in range(len(safePoints)):
-            for x in range(len(safePoints[y])):
-                imgBlood.SetPixel(x, y, z, 0)
+    # Find likely start and end points of our image by setting a mininum number of labeled pixels
+    start, end = filter_by_label_count(labels_valve_filtered, 10)
+    img_smooth = img_smooth[:, :, start:end]
+    labels_valve_filtered = labels_valve_filtered[:, :, start:end]
 
-    X['z'] = zog
-    for index, row in X.iterrows():
-        x, y, z, label = (row['x'], row['y'], row['z'], row['label'])
-        if label == 0:
-            imgBlood.SetPixel(int(x), int(y), z, 1)
+    # Use a segmentation-based clustering algorithm to attempt to find each valve
+    label_segments, x_max = kmeans_segment(labels_valve_filtered, use_z=False)
 
-    for z in range(imgOriginal.GetHeight()):
-        imgSmoothIntSingle = imgSmoothInt[:, :, z]
-        imgBloodSingle = imgBlood[:, :, z]
-        imgBloodSingle3 = imgBlood3[:, :, z]
+    left, right = (label_segments[0], label_segments[1])
+    if x_max[0] > x_max[1]:
+        left, right = right, left
 
-        df = {'x': [], 'y': []}
-        for y in range(len(safePoints)):
-            for x in range(len(safePoints[y])):
-                if imgBloodSingle.GetPixel(x, y):
-                    df['x'].append(x)
-                    df['y'].append(y)
-        df = pd.DataFrame.from_dict(df)
-        if df.shape[0] > 4:
-            fit = KMeans(n_clusters=2, random_state=0).fit(df)
-            labels = fit.labels_
-            df['label'] = pd.Series(labels)
+    # Finally, we can simply take the furthest point from the likely start/end points in order to get our annulus
+    # this can be done by every z value
+    left_points = {'x': [], 'y': [], 'z': []}
+    right_points = {'x': [], 'y': [], 'z': []}
+    zlen = len(sitk.GetArrayFromImage(left))
+    for z in xrange(zlen):
+        left_df = get_df_from_img(left[:, :, z], dimensions=2)
+        right_df = get_df_from_img(right[:, :, z], dimensions=2)
+        left_df['x_dist'] = (left_df['x'] - x_mid) ** 2
+        right_df['x_dist'] = (right_df['x'] - x_mid) ** 2
+        left_df['y_dist'] = (left_df['y'] - y_mid) ** 2
+        right_df['y_dist'] = (right_df['y'] - y_mid) ** 2
+        left_df['dist'] = np.sqrt(left_df['x_dist'] + left_df['y_dist'])
+        right_df['dist'] = np.sqrt(right_df['x_dist'] + right_df['y_dist'])
 
-            for index, row in df.iterrows():
-                x, y, label = (row['x'], row['y'], row['label'])
-                if label == 1:
-                    imgBloodSingle.SetPixel(int(x), int(y), z, 0)
+        if len(left_df['dist']) > 0:
+            index = left_df['dist'].idxmax()
+            row = left_df.iloc[index]
+            left_points['x'].append(row['x'])
+            left_points['y'].append(row['y'])
+            left_points['z'].append(z)
 
-            sitk_show(sitk.LabelOverlay(imgSmoothIntSingle, imgBloodSingle))
-    plt.show()
+        if len(right_df['dist']) > 0:
+            index = right_df['dist'].idxmax()
+            row = right_df.iloc[index]
+            right_points['x'].append(row['x'])
+            right_points['y'].append(row['y'])
+            right_points['z'].append(z)
+
+    final_left = pd.DataFrame.from_dict(left_points)
+    final_right = pd.DataFrame.from_dict(right_points)
+    print('Coordinates for one side of the ring')
+    print(final_left)
+    print('\n\nCoordinates for the other side of the ring')
+    print(final_right)
+    # show_all(img_smooth, left)
+
 
 if __name__ == '__main__':
     main()
